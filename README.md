@@ -68,7 +68,7 @@ upload/
 - Nested directories become nested folders.
 - Top-level children of `upload/` become top-level Studio folders.
 - A loose `Foo.feature` (stem ≠ parent folder name) becomes a child folder named `Foo`.
-- A directory with no matching `.feature` is still created (`Feature: <name>`).
+- A directory with no matching `.feature` is still created as an empty grouping folder. The uploader does **not** import a dummy `Feature: <name>` file — CucumberStudio would turn that into a nested folder with the same name.
 - Non-`.feature` files are ignored.
 
 If `upload/` is missing or contains no `.feature` files, the script exits and does **not** apply changes (that would wipe the remote suite).

@@ -214,6 +214,25 @@ function parseScenarioNames(gherkin) {
   return names;
 }
 
+/** True when Gherkin has at least one Scenario / Scenario Outline to import. */
+function hasGherkinToImport(text) {
+  return parseScenarioNames(text).length > 0;
+}
+
+/**
+ * Grouping folders (no scenarios) and Studio empty features should not
+ * trigger UPDATE. create_from_feature must not be used for these either —
+ * it nests a child folder named after the Feature: line.
+ */
+function isEmptyOrPlaceholder(text) {
+  return !hasGherkinToImport(text);
+}
+
+function sameFeature(localText, remoteText) {
+  if (normalizeGherkin(localText) === normalizeGherkin(remoteText)) return true;
+  return isEmptyOrPlaceholder(localText) && isEmptyOrPlaceholder(remoteText);
+}
+
 function parentPath(p) {
   const i = p.lastIndexOf('/');
   return i === -1 ? '' : p.slice(0, i);
@@ -297,6 +316,7 @@ function countFeatureFiles(dir) {
  * Each directory is a CucumberStudio folder. Gherkin comes from
  * `{folderName}.feature` inside it. Extra `.feature` files whose stem is not
  * the parent folder name become additional child folders.
+ * Directories with no matching `.feature` are grouping folders (empty Gherkin).
  *
  * @returns {Map<string, { path: string, name: string, featureText: string }>}
  */
@@ -316,7 +336,7 @@ function scanLocalTree(rootDir) {
       );
       const featureText = matching
         ? readFileSync(join(absDir, matching.name), 'utf-8')
-        : `Feature: ${folderName}\n`;
+        : '';
       nodes.set(relativePath, {
         path: relativePath,
         name: folderName,
@@ -432,7 +452,7 @@ async function buildPlan(localByPath, remoteByPath) {
       const remoteFeature = await apiGetText(
         `/projects/${PROJECT_ID}/folders/${remote.id}/feature`
       );
-      if (normalizeGherkin(local.featureText) === normalizeGherkin(remoteFeature)) {
+      if (sameFeature(local.featureText, remoteFeature)) {
         skips.push({ path, id: remote.id });
       } else {
         updates.push({ path, id: remote.id, name: local.name });
@@ -520,16 +540,14 @@ async function createFolder(name, parentId) {
   return String(id);
 }
 
-async function importNew(folderId, featureText) {
-  await apiSend(
-    'POST',
-    `/projects/${PROJECT_ID}/folders/${folderId}/create_from_feature`,
-    featurePayload(featureText)
-  );
-  await waitForImport(folderId);
-}
-
-async function importUpdate(folderId, featureText) {
+/**
+ * Set Gherkin on an existing folder in place.
+ *
+ * Do not use POST create_from_feature after createFolder: Studio creates a
+ * child folder named from the Feature: line (AS roles / AS roles).
+ */
+async function importFeature(folderId, featureText) {
+  if (!hasGherkinToImport(featureText)) return;
   await apiSend(
     'PATCH',
     `/projects/${PROJECT_ID}/folders/${folderId}/update_from_feature`,
@@ -543,7 +561,7 @@ async function wipeAndImport(folderId, featureText) {
     'DELETE',
     `/projects/${PROJECT_ID}/folders/${folderId}/scenarios`
   );
-  await importNew(folderId, featureText);
+  await importFeature(folderId, featureText);
 }
 
 async function remoteHasExtraScenarios(folderId, localFeatureText) {
@@ -588,7 +606,7 @@ async function applyPlan(plan, localByPath, remoteByPath, scenariosRootId) {
       console.log(`   ➕  Creating ${c.path}`);
       const id = await createFolder(local.name, parentId);
       idByPath.set(c.path, id);
-      await importNew(id, local.featureText);
+      await importFeature(id, local.featureText);
       stats.created++;
       console.log(`      ✅  ${c.path} (id: ${id})`);
     } catch (err) {
@@ -602,7 +620,7 @@ async function applyPlan(plan, localByPath, remoteByPath, scenariosRootId) {
     const folderId = u.id || idByPath.get(u.path);
     try {
       console.log(`   📝  Updating ${u.path}`);
-      await importUpdate(folderId, local.featureText);
+      await importFeature(folderId, local.featureText);
       if (await remoteHasExtraScenarios(folderId, local.featureText)) {
         console.log(`      🧹  Extra scenarios — wiping then re-importing`);
         await wipeAndImport(folderId, local.featureText);
