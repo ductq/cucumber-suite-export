@@ -1,4 +1,6 @@
 node_modules/
 .env
 features/
+upload/*
+!upload/.gitkeep
 .DS_Store

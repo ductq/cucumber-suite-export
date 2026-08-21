@@ -1,45 +1,99 @@
-# CucumberStudio Export Script
+# CucumberStudio Export / Upload Scripts
 
-This script automatically downloads all `.feature` files from a project in CucumberStudio and reconstructs the exact folder hierarchy on your local machine.
+Two portable Node scripts for a CucumberStudio project:
+
+- **Export** — download every folder’s `.feature` file and rebuild the tree under `./features/`
+- **Upload** — mirror a local tree under `./upload/` into CucumberStudio so the remote Features section matches that tree **exactly**
+
+Both scripts share the same `.env` credentials. They are standalone (no npm package).
 
 ## Prerequisites
 
-1. **Node.js**: Ensure you have Node.js installed on your machine (v18 or higher is recommended). You can verify this by running `node -v` in your terminal. If you don't have it, download it from [nodejs.org](https://nodejs.org/).
-2. **Account Access**: You must have an active CucumberStudio account with read access to the project you want to export.
+1. **Node.js** v18 or higher (`node -v`). Download from [nodejs.org](https://nodejs.org/) if needed.
+2. A CucumberStudio account with access to the project.
 
-## Setup Instructions
+## Setup
 
-1. **Locate the files**: Make sure both `export-features.mjs` and `.env.example` are placed together in the same folder on your computer.
-2. **Find your Project ID**: 
+1. Keep `export-features.mjs`, `upload-features.mjs`, and `.env.example` in the same folder.
+2. **Find your Project ID**:
    - Log into [CucumberStudio](https://studio.cucumberstudio.com/).
-   - Open the project you want to export.
-   - Look at the URL in your browser. It will look something like this: `https://studio.cucumberstudio.com/projects/123456/...`
-   - The number directly after `/projects/` is your **Project ID** (in this example, it would be `123456`).
-3. **Configure the `.env` file**: 
-   - Rename or copy the `.env.example` file to `.env`.
-   - Open the new `.env` file in any text editor and fill in your CucumberStudio credentials and the Project ID you just found:
-   ```env
-   EMAIL=your_actual_email@example.com
-   PASSWORD=your_actual_password
-   PROJECT_ID=123456
-   ```
-   *(Note: Do not put quotes around the values).*
+   - Open the project.
+   - The URL looks like `https://studio.cucumberstudio.com/projects/123456/...`
+   - The number after `/projects/` is the **Project ID**.
+3. Copy `.env.example` to `.env` and fill in:
 
-## Running the Script
+```env
+EMAIL=your_actual_email@example.com
+PASSWORD=your_actual_password
+PROJECT_ID=123456
+```
 
-1. Open your terminal (Mac/Linux) or Command Prompt/PowerShell (Windows).
-2. Navigate to the folder where you placed the script:
-   ```bash
-   cd path/to/the/folder
-   ```
-3. Run the script using Node:
-   ```bash
-   node export-features.mjs
-   ```
+Do not put quotes around the values.
 
-## What to Expect
+---
 
-- The script will log in securely and map out the folder structure of your project.
-- It will create a new folder named `features/` in your current directory.
-- Inside the `features/` folder, it will recreate the exact folder tree from CucumberStudio and save the downloaded Gherkin content as `.feature` files.
-- You can watch the progress in your terminal, which will summarize how many files were successfully downloaded and if any empty folders were created.
+## Export (`export-features.mjs`)
+
+Downloads all `.feature` files and recreates the CucumberStudio folder hierarchy under `./features/`.
+
+```bash
+node export-features.mjs
+```
+
+Each Studio **folder** is one feature. The exporter writes:
+
+```
+features/<path>/<FolderName>/<FolderName>.feature
+```
+
+---
+
+## Upload (`upload-features.mjs`)
+
+Reverse of export: reads a **dynamic** local tree (default `./upload/`) and makes the CucumberStudio project match it exactly — create missing folders, update Gherkin, **delete extra remote folders**, and wipe leftover scenarios that are not in the local file.
+
+### Folder-as-feature layout
+
+Put the suite inside `upload/` using the same shape export produces. The tree can change between runs; the script does not hardcode names.
+
+```
+upload/
+  Distribution Cable Renewal/
+    Distribution Cable Renewal.feature
+    Login/
+      Login.feature
+```
+
+- Directory `Login/` + `Login.feature` → remote folder `Login` with that Gherkin.
+- Nested directories become nested folders.
+- Top-level children of `upload/` become top-level Studio folders.
+- A loose `Foo.feature` (stem ≠ parent folder name) becomes a child folder named `Foo`.
+- A directory with no matching `.feature` is still created (`Feature: <name>`).
+- Non-`.feature` files are ignored.
+
+If `upload/` is missing or contains no `.feature` files, the script exits and does **not** apply changes (that would wipe the remote suite).
+
+### Dry-run vs apply
+
+Default is **dry-run**: it authenticates, diffs, and prints the plan. Nothing is written.
+
+```bash
+node upload-features.mjs                  # dry-run exact plan
+node upload-features.mjs --dir ./upload   # override source directory
+node upload-features.mjs --apply          # write; type yes if any deletes
+node upload-features.mjs --apply --yes    # write without the delete prompt
+```
+
+### Exact mirror — deletes
+
+`--apply` **permanently deletes** remote folders (and their children/scenarios) that are not in `./upload`. Renames and moves are delete-old + create-new (Studio ids are not preserved).
+
+If the plan includes deletes, you must type `yes` unless you pass `--yes`.
+
+Use dry-run first and read the `DELETE` list before applying.
+
+---
+
+## Rate limit
+
+Both scripts pause ~350ms between API calls (~170 req/min) to stay under CucumberStudio’s 200 req/min limit.
